@@ -1,0 +1,16 @@
+*.log
+*.tmp
+.env
+!.env.example
+ 
+node_modules/
+ 
+*.pdf
+!docs/*.pdf
+ 
+*.tar
+*.cpp
+*.out
+
+m5out/
+testcases_binaries_and_script/
