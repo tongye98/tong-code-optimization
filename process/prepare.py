@@ -6,9 +6,8 @@ import json
 logging.basicConfig(
     level=logging.INFO,  
     format='%(asctime)s - %(levelname)s - %(message)s',  
-    filename='creating_xxx.log'  
+    filename='compile_train.log'  
 )
-# assert  1 == 2
 
 TARGET_PROJECT = "/data1/tydata1/code_optimization/"
 INPUT_PROJECT = "/home/tongye/code_generation/pie-perf/data/"
@@ -17,8 +16,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description="create single python/c++ file")
     parser.add_argument('--output_dir', type=str, default=TARGET_PROJECT)
     parser.add_argument('--input_dir', type=str, default=INPUT_PROJECT)
-    parser.add_argument('--split', type=str, default='test')
+    parser.add_argument('--split', type=str, default='train')
     parser.add_argument('--language', type=str, default='cpp')
+    parser.add_argument('--cstd', type=str, default='std=c++17')
+    parser.add_argument('--optimization_flag', type=str, default='-O3')
+    parser.add_argument('--timeout_seconds_binary', type=int, default=10)
 
     args = parser.parse_args()
 
@@ -79,15 +81,118 @@ def creat_single_program(args):
 
     return None
 
-def check_compile(args):
+
+import resource
+MAX_VIRTUAL_MEMORY = 10 * 1024 * 1024 * 50 # 500MB
+def limit_virtual_memory():
+    resource.setrlimit(resource.RLIMIT_AS, (MAX_VIRTUAL_MEMORY*2, MAX_VIRTUAL_MEMORY*10))
+
+
+import shlex
+import subprocess
+import traceback
+
+def compile_cpp(args, cpp_file_path, target_split_out):
+    bin_file_path = re.sub('\.cpp', '.out', cpp_file_path)
+    bin_file_path = re.sub(f'{args.split}', f'{args.split}_out', bin_file_path)
+    # /data1/tydata1/code_optimization/cpp/test_out/p03420_s013947415_u280096880.out
+    # print(bin_file_path)
+
+    cmd = f"g++ {cpp_file_path} -o {bin_file_path} --{args.cstd} {args.optimization_flag}"
+    logging.info(f'Executing compile cmd: {cmd}')
+    cmd_args = shlex.split(cmd)
+
+    # stdout_path = re.sub('\.out','_compile_stdout.txt', bin_file_path)
+    # stderr_path = re.sub('\.out','_compile_stderr.txt', bin_file_path)
+    # print(f"stdout path = {stdout_path}")
+    # print(f"stderr_path = {stderr_path}")
+    result = {}
+    try:
+        p = subprocess.run(cmd_args,
+                            preexec_fn=limit_virtual_memory,
+                            bufsize=MAX_VIRTUAL_MEMORY,
+                            timeout=args.timeout_seconds_binary,
+                            text=True,
+                            capture_output=True
+                            )
+        returncode = p.returncode
+        stdout = p.stdout
+        stderr = p.stderr
+
+        result['cpp_file_path'] = cpp_file_path
+        result['bin_file_path'] = bin_file_path
+        result['returncode'] = returncode
+        result['stdout'] = stdout
+        result['stderr'] = stderr
+        result['exception'] = False
+
+    except Exception as e:
+        logging.error(f"compilation error at {cpp_file_path}")
+        result['cpp_file_path'] = cpp_file_path
+        result['bin_file_path'] = bin_file_path
+        result['returncode'] = -100
+        result['stdout'] = str(e)
+        result['stderr'] = traceback.format_exc()
+        result['exception'] = True
+    
+    return result
+
+
+import glob
+def compile_check(args):
     """
     check each cpp file can be compiled by g++.
     """
-    target_split = os.path.join(args.output_dir, args.language, f"{args.split}.out")
-    # target_split: /data1/ytdata1/code_optimization/cpp/test_out
-    if not os.path.exists(target_split):
-        logging.warning('{target_split} dir does not exits, creating...')
-        os.makedirs(target_split, exist_ok=True)
+    target_split_out = os.path.join(args.output_dir, args.language, f"{args.split}_out")
+    # target_split_out: /data1/ytdata1/code_optimization/cpp/test_out
+    if not os.path.exists(target_split_out):
+        logging.warning(f'{target_split_out} dir does not exits, creating...')
+        os.makedirs(target_split_out, exist_ok=True)
+    
+    source_project = os.path.join(args.output_dir, args.language, args.split)
+    # source_project: /data1/ytdata1/code_optimization/cpp/test
+    cpp_files_path = glob.glob(os.path.join(source_project, f"*.cpp"))
+    # print(cpp_files)
+    # print(len(cpp_files))
+
+    results = []
+    cpp_files_count = len(cpp_files_path)
+    for idx, cpp_file_path in enumerate(cpp_files_path):
+        # each cpp_file compiled to cpp.out in 'test_out' dir and a result.json
+        logging.info(f"Compiling {idx+1}/{cpp_files_count} {cpp_file_path}")
+        print(f"Compiling {cpp_file_path}")
+        result = compile_cpp(args, cpp_file_path, target_split_out)
+        results.append(result)
+
+    assert len(results) == cpp_files_count
+
+    results_path = os.path.join(args.output_dir, args.language, f"compile_result_{args.split}.json")
+    with open(results_path, 'w') as fresult:
+        json.dump(results, fresult, indent=4)
+
+    return None 
+
+def data_collection_after_compile(args):
+    original_split_cpp = os.path.join(args.output_dir, args.language, args.split)
+    cpp_files = glob.glob(os.path.join(original_split_cpp, "*.cpp"))
+    print(f"Original {args.language}-{args.split} set has {len(cpp_files)} files.")
+
+    target_split_out = os.path.join(args.output_dir, args.language, f"{args.split}_out")
+    # target_split_out: /data1/ytdata1/code_optimization/cpp/test_out
+    cpp_out_files = glob.glob(os.path.join(target_split_out, f"*.out"))
+    print(f"After compile: {args.language}-{args.split} set has {len(cpp_out_files)} files.")
+    print(f"Compiled Error files: {len(cpp_files)-len(cpp_out_files)} files.")
+
+    return None 
+
+def compile_by_hand(args):
+    target_split = os.path.join(args.output_dir, args.language, args.split)
+    # target_split_out: /data1/ytdata1/code_optimization/cpp/test
+    cpp_file_path = os.path.join(target_split, "p03313_s860695382_u139031151.cpp")
+    bin_file_path = "a.out"
+    cmd = f"g++ {cpp_file_path} -o {bin_file_path} --{args.cstd} {args.optimization_flag}"
+    cmd_args = shlex.split(cmd)
+    p = subprocess.run(cmd_args)
     return None 
 
 
@@ -125,4 +230,8 @@ if __name__ == "__main__":
 
     # creat_single_program(args)
 
-    check_compile(args)
+    compile_check(args)
+
+    # data_collection_after_compile(args)
+
+    # compile_by_hand(args)
