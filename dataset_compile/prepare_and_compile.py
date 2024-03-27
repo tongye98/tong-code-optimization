@@ -6,17 +6,17 @@ import json
 logging.basicConfig(
     level=logging.INFO,  
     format='%(asctime)s - %(levelname)s - %(message)s',  
-    filename='compile_train.log'  
+    filename='compile_xxx.log'  
 )
 
-TARGET_PROJECT = "/data1/tydata1/code_optimization/"
+TARGET_PROJECT = "/data3/tydata3/code_optimization/"
 INPUT_PROJECT = "/home/tongye/code_generation/pie-perf/data/"
 
 def parse_args():
     parser = argparse.ArgumentParser(description="create single python/c++ file")
     parser.add_argument('--output_dir', type=str, default=TARGET_PROJECT)
     parser.add_argument('--input_dir', type=str, default=INPUT_PROJECT)
-    parser.add_argument('--split', type=str, default='train')
+    parser.add_argument('--split', type=str, default='test')
     parser.add_argument('--language', type=str, default='cpp')
     parser.add_argument('--cstd', type=str, default='std=c++17')
     parser.add_argument('--optimization_flag', type=str, default='-O3')
@@ -230,8 +230,8 @@ if __name__ == "__main__":
 
     # creat_single_program(args)
 
-    compile_check(args)
+    # compile_check(args)
 
-    # data_collection_after_compile(args)
+    data_collection_after_compile(args)
 
     # compile_by_hand(args)
