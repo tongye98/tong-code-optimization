@@ -13,10 +13,10 @@ TARGET_PROJECT = "/data3/tydata3/code_optimization/"
 INPUT_PROJECT = "/home/tongye/code_generation/pie-perf/data/"
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="create single python/c++ file")
+    parser = argparse.ArgumentParser(description="create and compile single python/c++ file")
     parser.add_argument('--output_dir', type=str, default=TARGET_PROJECT)
     parser.add_argument('--input_dir', type=str, default=INPUT_PROJECT)
-    parser.add_argument('--split', type=str, default='test')
+    parser.add_argument('--split', type=str, default='val')
     parser.add_argument('--language', type=str, default='cpp')
     parser.add_argument('--cstd', type=str, default='std=c++17')
     parser.add_argument('--optimization_flag', type=str, default='-O3')
@@ -183,6 +183,28 @@ def data_collection_after_compile(args):
     print(f"After compile: {args.language}-{args.split} set has {len(cpp_out_files)} files.")
     print(f"Compiled Error files: {len(cpp_files)-len(cpp_out_files)} files.")
 
+    compile_result_json = os.path.join(args.output_dir, args.language, f"compile_result_{args.split}.json")
+    print(f"compile result json = {compile_result_json}")
+
+    with open(compile_result_json, 'r') as f:
+        compile_results = json.load(f) # list
+
+    error_compile_count = 0
+    exception_compile_count = 0
+    for item in compile_results:
+        # item: dict
+        returncode = item["returncode"]
+        if returncode != 0:
+            error_compile_count += 1
+            #TODO: can find which cpp is not compile correct.
+            if returncode == -100:
+                exception_compile_count += 1
+                # print(item)
+                # assert False
+
+    print(f"ERROR compile count: {error_compile_count}")
+    print(f"EXCEPTION compile count: {exception_compile_count}")
+
     return None 
 
 def compile_by_hand(args):
@@ -221,6 +243,36 @@ def get_physical_cpu_list():
     logging.info(unique_logical_ids)
     return unique_logical_ids
 
+def fix_for_servers(args):
+    compile_result_json = os.path.join(args.output_dir, args.language, f"compile_result_{args.split}.json")
+    print(f"compile result json = {compile_result_json}")
+
+    with open(compile_result_json, 'r') as f:
+        compile_results = json.load(f)
+    
+    for item in compile_results:
+        # item: dict
+        cpp_file_path = item["cpp_file_path"]
+        bin_file_path = item["bin_file_path"]
+
+        # print(f"before fix cpp file path = {cpp_file_path}")
+        # print(f"after fix  bin file path = {bin_file_path}")
+
+        new_cpp_file_path = cpp_file_path.replace('/data1/tydata1', '/data3/tydata3')
+        new_bin_file_path = bin_file_path.replace('/data1/tydata1', '/data3/tydata3')
+
+        # print(f"before fix cpp file path = {new_cpp_file_path}")
+        # print(f"after fix  bin file path = {new_bin_file_path}")
+
+        item["cpp_file_path"] = new_cpp_file_path
+        item["bin_file_path"] = new_bin_file_path
+
+    results_path = os.path.join(args.output_dir, args.language, f"fix_compile_result_{args.split}.json")
+    with open(results_path, 'w') as fresult:
+        json.dump(compile_results, fresult, indent=4)
+
+
+    return None
 
 
 if __name__ == "__main__":
@@ -235,3 +287,5 @@ if __name__ == "__main__":
     data_collection_after_compile(args)
 
     # compile_by_hand(args)
+
+    # fix_for_servers(args)
