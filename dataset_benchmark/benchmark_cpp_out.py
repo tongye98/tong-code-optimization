@@ -18,7 +18,7 @@ def limit_virtual_memory():
 logging.basicConfig(
     level=logging.INFO,  
     format='%(asctime)s - %(levelname)s - %(message)s',  
-    filename='benchmark_test.log'  
+    filename='benchmark_xxx.log'  
 )
 
 TARGET_PROJECT = "/data3/tydata3/code_optimization/"
@@ -30,7 +30,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="benchmark python/c++ out file")
     parser.add_argument('--output_dir', type=str, default=TARGET_PROJECT)
     parser.add_argument('--input_dir', type=str, default=INPUT_PROJECT)
-    parser.add_argument('--split', type=str, default='test')
+    parser.add_argument('--split', type=str, default='train')
     parser.add_argument('--language', type=str, default='cpp')
     parser.add_argument('--cstd', type=str, default='std=c++17')
     parser.add_argument('--optimization_flag', type=str, default='-O3')
@@ -47,6 +47,10 @@ def parse_args():
         logging.info(f'{arg_name}: {arg_value}')
     
     return args
+
+######################################
+######  BEGIN BENCHMARK  #############
+######################################
 
 def execute_bin(args, bin_file_path, input_case_path):
     logging.info(f"Binary executing {bin_file_path}, with input {input_case_path}")
@@ -274,8 +278,13 @@ def check_warning_after_benchmark(args):
     
     testcases_error_count = 0
     item_error_count = 0
+    returncode_bin_error_count = 0
+    returncode_gem5_error_count = 0
     for item in tqdm(compile_results, desc="Check_warning_after_benchmark:"):  # for each bin out
         # item: dict
+        if item["returncode"] != 0: # pass error *.out
+            continue
+
         cpp_file_path = item["cpp_file_path"]
         bin_file_path = item["bin_file_path"]
 
@@ -310,20 +319,137 @@ def check_warning_after_benchmark(args):
         # print(test_cases_results)
         for each_result in test_cases_results:
             returncode = each_result['returncode']
-            if returncode == -1:
+            if returncode == -100:
                 testcases_error_count += 1
                 is_item_error = True
+            
+            returncode_bin = each_result['returncode_bin']
+            returncode_gem5 = each_result['returncode_gem5']
+            if returncode_bin != 0:
+                returncode_bin_error_count += 1
+            if returncode_gem5 != 0:
+                returncode_gem5_error_count += 1
         
         if is_item_error:
             item_error_count += 1
     
     print(f"testcases error count: {testcases_error_count}")
     print(f"item error count : {item_error_count}")
+    print(f"returncode bin error count : {returncode_bin_error_count}")
+    print(f"returncode gem5 error count : {returncode_gem5_error_count}")
+
+
+def get_accuracy(stdout, truth) -> bool:
+    """
+    Compare the output of the code with the ground truth.
+    """
+    ground_truth_lines = truth.strip().splitlines()
+    output_lines = stdout.strip().splitlines()
+    IsCorrect = True
+    for gen_output, ground_truth_output in zip(output_lines, ground_truth_lines):
+        is_corr = gen_output == ground_truth_output
+        if not is_corr:
+            try:
+                gen_output = float(gen_output)
+                ground_truth_output = float(ground_truth_output)
+                is_corr = abs(gen_output - ground_truth_output) < 1e-3
+            except:
+                pass
+        
+        if not is_corr:
+            IsCorrect = False
+    
+    return IsCorrect
 
 
 def check_correctness_after_benchmark(args):
     # check the cpp out is correct ?
-    return None
+    compile_result_json = os.path.join(args.output_dir, args.language, f"compile_result_{args.split}.json")
+    logging.info(f"compile result json = {compile_result_json}")
+
+    with open(compile_result_json, 'r') as f:
+        compile_results = json.load(f)
+    
+    print(f"befor compile, there are  {len(compile_results)} out length.")
+    compile_correct_count = 0
+
+    bench_correct_exec_correct_count = 0
+    bench_correct_exec_wrong_count = 0
+    bench_wrong_exec_correct_count = 0
+    bench_wrong_exec_wrong_count = 0
+
+    for item in tqdm(compile_results, desc="Check_correctness_after_benchmark:"):  # for each bin out
+        # item: dict
+        if item["returncode"] != 0: # confirm can compile, pass error *.out
+            continue
+        compile_correct_count += 1
+        
+        cpp_file_path = item["cpp_file_path"]
+        bin_file_path = item["bin_file_path"]
+
+        pattern_problem_id = r'p\d+'
+        pattern_submission_id = r's\d+'
+        pattern_user_id = r'u\d+'
+
+        match_problem_id = re.search(pattern_problem_id, bin_file_path)
+        match_submission_id = re.search(pattern_submission_id, bin_file_path)
+        match_user_id = re.search(pattern_user_id, bin_file_path)
+
+        if match_problem_id and match_submission_id and match_user_id:
+            problem_id = match_problem_id.group()
+            submission_id = match_submission_id.group()
+            user_id = match_user_id.group()
+        else:
+            raise ValueError("problem_id or submission_id or user_id does not exist!")
+
+        logging.info(f"Problem id = {problem_id} | User id = {user_id} | Submission id = {submission_id}") 
+
+        test_cases_dir_in_problem_id = os.path.join(MERGED_TEST_CASES, problem_id)
+        gem5_out_path = os.path.join(TARGET_PROJECT, args.language, "benchmark_gem5", f"{args.split}_out", problem_id, user_id, submission_id)
+        with open(os.path.join(gem5_out_path, f"testcases_{MAX_TESTCASES}_benchmark_results.json"), 'r') as g:
+            test_cases_results = json.load(g)
+        
+
+        def analysis(each_result):
+
+            returncode = each_result["returncode"]
+            bench_result = True if returncode == 0 else False
+
+            test_case_id = each_result["test_case_id"]
+
+            groundtruth = os.path.join(test_cases_dir_in_problem_id, f"output.{test_case_id}.txt") # ground truth
+            stdout_bin = each_result["stdout_bin"]  # get the run result
+
+            with open(groundtruth, 'r') as g:
+                truth = g.read().strip()
+
+            IsCorrect = get_accuracy(stdout_bin, truth)
+            exec_result = True if IsCorrect else False
+
+            return bench_result, exec_result
+
+        out_bench_result = True
+        out_exec_result = True
+        for each_result in test_cases_results:
+            bench_result, exec_result = analysis(each_result)
+            if bench_result is False: out_bench_result = False
+            if exec_result is False: out_exec_result = False
+        
+        if out_bench_result and out_exec_result:
+            bench_correct_exec_correct_count += 1
+        elif out_bench_result and (not out_exec_result):
+            bench_correct_exec_wrong_count += 1
+        elif (not out_bench_result) and out_exec_result:
+            bench_wrong_exec_correct_count += 1
+        else:
+            bench_wrong_exec_wrong_count += 1
+
+    print(f"after compile, there are  {compile_correct_count} out length.")
+    print(f"bench correct and exec correct = {bench_correct_exec_correct_count}")
+    print(f"bench correct but exec wrong = {bench_correct_exec_wrong_count}")
+    print(f"bench wrong but exec correct = {bench_wrong_exec_correct_count}")
+    print(f"bench wrong and exec wrong = {bench_wrong_exec_wrong_count}")
+
 
 def data_stats_after_benchmark(args):
     # for each problem
@@ -368,18 +494,16 @@ def gem5_check_by_hand(args):
     print(f"stderr = {stderr}")
 
 
-
-
 if __name__ == "__main__":
     args = parse_args()
 
     # benchmark(args)
 
-    benchmark_multiprocess(args)
+    # benchmark_multiprocess(args)
 
     # check_warning_after_benchmark(args)
 
-    # check_after_benchmark(ags)
+    check_correctness_after_benchmark(args)
 
     # data_stats_after_benchmark(args)
 
