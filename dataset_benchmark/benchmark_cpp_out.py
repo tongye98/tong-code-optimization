@@ -21,7 +21,7 @@ def limit_virtual_memory():
 logging.basicConfig(
     level=logging.INFO,  
     format='%(asctime)s - %(levelname)s - %(message)s',  
-    filename='collect_bench_correct_exec_correct_by_problem_train.log'  
+    filename='rank_by_user_train.log'  
 )
 
 TARGET_PROJECT = "/data3/tydata3/code_optimization/"
@@ -720,6 +720,109 @@ def calculate_sim_seconds(stats):
     return float(stats["sim_ticks"]) / float(stats["sim_freq"])
 
 
+def sort_submission_by_sim_seconds(bench, problem):
+    """
+    return:
+        [{submission_id:xxx, user_id:xxx, problem_id:xxx, average_sim_seconds_precise:xxx}]
+        in order: from big to small <==> from slow to fast
+    """
+    with open(bench, 'r') as f:
+        data = json.load(f)
+    
+    times = {} # {submission_id1:[time1, time2, time3], submission_id2: [time1, time2, time3]}
+    users = {}
+
+    for entry in data:
+        submission_id = list(entry.keys())[0]
+        if submission_id not in times:
+            times[submission_id] = []
+            users[submission_id] = []
+        
+        times[submission_id].append(list(entry.values())[0]["sim_seconds_precise"])
+        users[submission_id].append(list(entry.values())[0]["user_id"])
+    
+    
+    # list is in order 
+    average_time = {key: sum(value)/ len(value) for key, value in times.items()}
+    # print(average_time)
+
+
+    for key, value in users.items():
+        # value is a list
+        first_user_id = value[0]
+        if not all(element == first_user_id for element in value):
+            raise ValueError(f"same submission {key} belongs to different user {value}.")
+
+    sorted_submission = sorted(average_time.items(), key=lambda x:x[1], reverse=True)
+    # print(sorted_submission)
+
+    result = []
+    for (submission_id, sim_seconds) in sorted_submission:
+        user_id = users[submission_id][0]
+        item = {
+            "problem_id": problem,
+            "user_id": user_id,
+            "submission_id": submission_id,
+            "average_sim_seconds_precise": sim_seconds,
+        }
+        result.append(item)
+
+    return result
+
+
+def rank_by_problem(args):
+    """
+    generate a rank jsonl file in  /data3/tydata3/code_optimization/cpp/prepared_by_problem/test/
+    rank.jsonl
+
+    { problem_id:xxx, 
+      slow: {user_id:xxx, submission_id:xxx, average_sim_seconds_precise:xxx},
+      fast: {suer_id:xxx, submission_id:xxx, average_sim_seconds_precise:xxx},
+    }
+    """
+    target_dir = os.path.join(TARGET_PROJECT, args.language, "prepared_by_problem", args.split)
+    problem_dir = os.listdir(target_dir)
+    print(f"There are {len(problem_dir)} problems.")
+    # print(problem_dir)
+    for each_problem in tqdm(problem_dir, desc="Rank"):
+        problem_dir_path = os.path.join(target_dir, each_problem)
+        # /data3/tydata3/code_optimization/cpp/prepared_by_problem/test/p03275
+        bench = os.path.join(problem_dir_path, "problem_bench_gem5.json")
+        result = sort_submission_by_sim_seconds(bench, each_problem)
+        # [{submission_id:xxx, user_id:xxx, problem_id:xxx, average_sim_seconds_precise:xxx}]
+        #  in order: from big to small <==> from slow to fast
+
+        rank_jsonl_path = os.path.join(problem_dir_path, "rank.jsonl")
+        with open(rank_jsonl_path, 'w') as g:
+            for entry in result:
+                json.dump(entry, g)
+                g.write("\n")
+
+
+def rank_by_user(args):
+    """
+    generate a rank jsonl file in /data3/tydata3/code_optimization/cpp/prepared_by_user/test/pxxxx/uxxxx/
+    """
+    target_dir = os.path.join(TARGET_PROJECT, args.language, "prepared_by_user", args.split)
+    problem_dir = os.listdir(target_dir)
+    print(f"There are {len(problem_dir)} problems.")
+    for each_problem in tqdm(problem_dir,desc='Rank'):
+        problem_dir_path = os.path.join(target_dir, each_problem)
+        # /data3/tydata3/code_optimization/cpp/prepared_by_user/test/p03275
+        user_dir = os.listdir(problem_dir_path)
+        for each_user in user_dir:
+            user_dir_path = os.path.join(problem_dir_path, each_user)
+            # /data3/tydata3/code_optimization/cpp/prepared_by_user/test/p03275/u018679195
+            bench = os.path.join(user_dir_path, "problem_user_bench_gem5.json")
+            result = sort_submission_by_sim_seconds(bench, each_problem)
+
+            rank_jsonl_path = os.path.join(user_dir_path, "rank.jsonl")
+            with open(rank_jsonl_path, 'w') as g:
+                for entry in result:
+                    json.dump(entry, g)
+                    g.write("\n")
+
+
 def gem5_check_by_hand(args):
     bin_file_path = os.path.join("/data3/tydata3/code_optimization/cpp/test_out/p00030_s870509314_u032763525.out")
     input_case_path = os.path.join("/home/tongye/code_generation/pie-perf/data/test_cases/merged_test_cases/p00030/input.6.txt")
@@ -758,6 +861,16 @@ def gem5_check_by_hand(args):
     print(f"stdout = {stdout}")
     print(f"stderr = {stderr}")
 
+def statistics(args):
+    cpp_file_count = 0
+    target_dir = os.path.join(TARGET_PROJECT, args.language, "prepared_by_user", args.split)
+    for root, dirs, files in os.walk(target_dir):
+        for file in files:
+            if file.endswith(".cpp"):
+                cpp_file_count += 1
+    
+    print(f"There are {cpp_file_count} cpp file.")
+
 
 if __name__ == "__main__":
     args = parse_args()
@@ -772,10 +885,12 @@ if __name__ == "__main__":
 
     # collect_bench_correct_exec_correct_by_user(args)
 
-    collect_bench_correct_exec_correct_by_problem(args)
-
-    # rank_by_user(args)
+    # collect_bench_correct_exec_correct_by_problem(args)
 
     # rank_by_problem(args)
 
+    rank_by_user(args)
+
     # gem5_check_by_hand(args)
+
+    # statistics(args)
