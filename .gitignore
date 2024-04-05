@@ -16,3 +16,4 @@ m5out/
 testcases_binaries_and_script/
 
 *.csv
+*.jsonl

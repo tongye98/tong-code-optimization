@@ -10,6 +10,9 @@ import subprocess
 import shlex
 import resource
 from tqdm import tqdm 
+import shutil
+import ast 
+
 
 MAX_VIRTUAL_MEMORY = 10 * 1024 * 1024 * 50  # 500 MB
 def limit_virtual_memory():
@@ -18,7 +21,7 @@ def limit_virtual_memory():
 logging.basicConfig(
     level=logging.INFO,  
     format='%(asctime)s - %(levelname)s - %(message)s',  
-    filename='benchmark_xxx.log'  
+    filename='collect_bench_correct_exec_correct_by_problem_train.log'  
 )
 
 TARGET_PROJECT = "/data3/tydata3/code_optimization/"
@@ -451,9 +454,271 @@ def check_correctness_after_benchmark(args):
     print(f"bench wrong and exec wrong = {bench_wrong_exec_wrong_count}")
 
 
-def data_stats_after_benchmark(args):
-    # for each problem
-    return None 
+def collect_bench_correct_exec_correct_by_user(args):
+    """
+    collect bench correct & exec correct by author -> prepared/
+    """
+    compile_result_json = os.path.join(args.output_dir, args.language, f"compile_result_{args.split}.json")
+    logging.info(f"compile result json = {compile_result_json}")
+
+    with open(compile_result_json, 'r') as f:
+        compile_results = json.load(f)
+    
+    print(f"befor compile, there are  {len(compile_results)} out length.")
+
+    for item in tqdm(compile_results, desc="collect bench&exec correct by user:"):  # for each bin out
+        # item: dict
+        if item["returncode"] != 0: # confirm can compile, pass error *.out
+            continue
+        
+        cpp_file_path = item["cpp_file_path"]
+        bin_file_path = item["bin_file_path"]
+
+        pattern_problem_id = r'p\d+'
+        pattern_submission_id = r's\d+'
+        pattern_user_id = r'u\d+'
+
+        match_problem_id = re.search(pattern_problem_id, bin_file_path)
+        match_submission_id = re.search(pattern_submission_id, bin_file_path)
+        match_user_id = re.search(pattern_user_id, bin_file_path)
+
+        if match_problem_id and match_submission_id and match_user_id:
+            problem_id = match_problem_id.group()
+            submission_id = match_submission_id.group()
+            user_id = match_user_id.group()
+        else:
+            raise ValueError("problem_id or submission_id or user_id does not exist!")
+
+        logging.info(f"Problem id = {problem_id} | User id = {user_id} | Submission id = {submission_id}") 
+
+        test_cases_dir_in_problem_id = os.path.join(MERGED_TEST_CASES, problem_id)
+        gem5_out_path = os.path.join(TARGET_PROJECT, args.language, "benchmark_gem5", f"{args.split}_out", problem_id, user_id, submission_id)
+        with open(os.path.join(gem5_out_path, f"testcases_{MAX_TESTCASES}_benchmark_results.json"), 'r') as g:
+            test_cases_results = json.load(g)
+        
+
+        def analysis(each_result):
+
+            returncode = each_result["returncode"]
+            bench_result = True if returncode == 0 else False
+
+            test_case_id = each_result["test_case_id"]
+
+            groundtruth = os.path.join(test_cases_dir_in_problem_id, f"output.{test_case_id}.txt") # ground truth
+            stdout_bin = each_result["stdout_bin"]  # get the run result
+
+            with open(groundtruth, 'r') as g:
+                truth = g.read().strip()
+
+            IsCorrect = get_accuracy(stdout_bin, truth)
+            exec_result = True if IsCorrect else False
+
+            return bench_result, exec_result
+
+        out_bench_result = True
+        out_exec_result = True
+        for each_result in test_cases_results:
+            bench_result, exec_result = analysis(each_result)
+            if bench_result is False: out_bench_result = False
+            if exec_result is False: out_exec_result = False
+        
+        if out_bench_result and out_exec_result:
+            # get the binary that  bench is right and exec is right
+            # make dir  prepared / test / problem / user / xxx.cpp + problem_user_bench_gem5.json
+            # 1. 把相应的cpp文件放到上面的相应的文件夹内;
+            # 2. 把相应的 gem5_stat.*.txt 对应的时间信息抽取出来放到 problem_user_ben_gem5.json中;
+            # [{submit_id: {problem:xxx, user:xxx, sim_senconds:xxx, sim_ticks:xxx, sim_seconds_precise:xxx}}]
+            cpp_file_target = os.path.join(TARGET_PROJECT, args.language, "prepared_by_user", args.split, problem_id, user_id)
+            if not os.path.isdir(cpp_file_target):
+                os.makedirs(cpp_file_target)
+                logging.info(f"Directory '{cpp_file_target}' created successfully.")
+            else:
+                logging.info(f"Directory '{cpp_file_target}' already exists.")
+
+            shutil.copy(cpp_file_path, cpp_file_target)
+
+            user_summary = os.path.join(cpp_file_target, "problem_user_bench_gem5.json")
+            if os.path.exists(user_summary):
+                with open(user_summary, 'r') as f_exist:
+                    existing_data = json.load(f_exist)
+            else:
+                existing_data = []
+
+            with open(user_summary, 'w') as f_write:
+                gem5_stats_paths = glob.glob(os.path.join(gem5_out_path, 'gem5_stats.*.txt'))
+                for gem5_stats_path in gem5_stats_paths:
+                    test_case_id = re.search('gem5_stats\.([0-9]+)\.txt', gem5_stats_path).group(1)
+                    stats = parse_stats_txt(gem5_stats_path)
+                    stats_record = {
+                        submission_id: {"problem_id": problem_id,
+                                        "user_id": user_id,
+                                        "submission_id": submission_id,
+                                        "test_case_id": test_case_id,
+                                        "sim_seconds": stats["sim_seconds"],
+                                        "sim_ticks": stats["sim_ticks"],
+                                        "sim_seconds_precise": stats["sim_seconds_precise"]
+                                        }
+                    }
+                    existing_data.append(stats_record)
+
+                json.dump(existing_data, f_write, indent=4)
+        else:
+            continue
+
+def collect_bench_correct_exec_correct_by_problem(args):
+    """
+    collect bench correct & exec correct by problem -> prepared/
+    """
+    compile_result_json = os.path.join(args.output_dir, args.language, f"compile_result_{args.split}.json")
+    logging.info(f"compile result json = {compile_result_json}")
+
+    with open(compile_result_json, 'r') as f:
+        compile_results = json.load(f)
+
+    for item in tqdm(compile_results, desc="collect bench&exec correct by problem:"):  # for each bin out
+        # item: dict
+        if item["returncode"] != 0: # confirm can compile, pass error *.out
+            continue
+        
+        cpp_file_path = item["cpp_file_path"]
+        bin_file_path = item["bin_file_path"]
+
+        pattern_problem_id = r'p\d+'
+        pattern_submission_id = r's\d+'
+        pattern_user_id = r'u\d+'
+
+        match_problem_id = re.search(pattern_problem_id, bin_file_path)
+        match_submission_id = re.search(pattern_submission_id, bin_file_path)
+        match_user_id = re.search(pattern_user_id, bin_file_path)
+
+        if match_problem_id and match_submission_id and match_user_id:
+            problem_id = match_problem_id.group()
+            submission_id = match_submission_id.group()
+            user_id = match_user_id.group()
+        else:
+            raise ValueError("problem_id or submission_id or user_id does not exist!")
+
+        logging.info(f"Problem id = {problem_id} | User id = {user_id} | Submission id = {submission_id}") 
+
+        test_cases_dir_in_problem_id = os.path.join(MERGED_TEST_CASES, problem_id)
+        gem5_out_path = os.path.join(TARGET_PROJECT, args.language, "benchmark_gem5", f"{args.split}_out", problem_id, user_id, submission_id)
+        with open(os.path.join(gem5_out_path, f"testcases_{MAX_TESTCASES}_benchmark_results.json"), 'r') as g:
+            test_cases_results = json.load(g)
+        
+
+        def analysis(each_result):
+
+            returncode = each_result["returncode"]
+            bench_result = True if returncode == 0 else False
+
+            test_case_id = each_result["test_case_id"]
+
+            groundtruth = os.path.join(test_cases_dir_in_problem_id, f"output.{test_case_id}.txt") # ground truth
+            stdout_bin = each_result["stdout_bin"]  # get the run result
+
+            with open(groundtruth, 'r') as g:
+                truth = g.read().strip()
+
+            IsCorrect = get_accuracy(stdout_bin, truth)
+            exec_result = True if IsCorrect else False
+
+            return bench_result, exec_result
+
+        out_bench_result = True
+        out_exec_result = True
+        for each_result in test_cases_results:
+            bench_result, exec_result = analysis(each_result)
+            if bench_result is False: out_bench_result = False
+            if exec_result is False: out_exec_result = False
+        
+        if out_bench_result and out_exec_result:
+            # get the binary that  bench is right and exec is right
+            # make dir  prepared / test / problem / user / xxx.cpp + problem_user_bench_gem5.json
+            # 1. 把相应的cpp文件放到上面的相应的文件夹内;
+            # 2. 把相应的 gem5_stat.*.txt 对应的时间信息抽取出来放到 problem_user_ben_gem5.json中;
+            # [{submit_id: {problem:xxx, user:xxx, sim_senconds:xxx, sim_ticks:xxx, sim_seconds_precise:xxx}}]
+            cpp_file_target = os.path.join(TARGET_PROJECT, args.language, "prepared_by_problem", args.split, problem_id)
+            if not os.path.isdir(cpp_file_target):
+                os.makedirs(cpp_file_target)
+                logging.info(f"Directory '{cpp_file_target}' created successfully.")
+            else:
+                logging.info(f"Directory '{cpp_file_target}' already exists.")
+
+            shutil.copy(cpp_file_path, cpp_file_target)
+
+            user_summary = os.path.join(cpp_file_target, "problem_bench_gem5.json")
+            if os.path.exists(user_summary):
+                with open(user_summary, 'r') as f_exist:
+                    existing_data = json.load(f_exist)
+            else:
+                existing_data = []
+
+            with open(user_summary, 'w') as f_write:
+                gem5_stats_paths = glob.glob(os.path.join(gem5_out_path, 'gem5_stats.*.txt'))
+                for gem5_stats_path in gem5_stats_paths:
+                    test_case_id = re.search('gem5_stats\.([0-9]+)\.txt', gem5_stats_path).group(1)
+                    stats = parse_stats_txt(gem5_stats_path)
+                    stats_record = {
+                        submission_id: {"problem_id": problem_id,
+                                        "user_id": user_id,
+                                        "submission_id": submission_id,
+                                        "test_case_id": test_case_id,
+                                        "sim_seconds": stats["sim_seconds"],
+                                        "sim_ticks": stats["sim_ticks"],
+                                        "sim_seconds_precise": stats["sim_seconds_precise"]
+                                        }
+                    }
+                    existing_data.append(stats_record)
+
+                json.dump(existing_data, f_write, indent=4)
+        else:
+            continue
+
+
+def parse_stats_txt(gem5_stats_path):
+    with open(gem5_stats_path, 'r') as f:
+        stats_lines = f.readlines()
+    
+    stats = {}
+    for line in stats_lines:
+        if line.strip() == '':
+            continue 
+        if "Begin" in line:
+            continue
+        if "End" in line:
+            continue
+        line = re.sub("#.*", "", line).strip() # remove comments
+        parts = line.split()
+        parts = [part.strip() for part in parts]
+        if len(parts) > 2:
+            value = parts[1:]
+        elif len(parts) == 2:
+            value = parts[1]
+        else:
+            logging.warning(f"could not parse line {line}")
+            continue
+        key = parts[0]
+        if isinstance(value, str):
+            try:
+                value = value.replace("%", "").replace("nan", "None").replace("inf", "None").replace("-inf", "None")
+                value = ast.literal_eval(value) if value != "None" else None
+            except:
+                logging.warning(f"could not parse value {value} for key {key}")
+        elif isinstance(value, list):
+            try:
+                value = [v.replace("%", "").replace("nan", "None").replace("inf", "None").replace("-inf", "None") for v in value]
+                value = [ast.literal_eval(v) if v!= "None" else None for v in value]
+            except:
+                logging.warning(f"could not parse value {value} for key {key}")
+        
+        stats[key] = value
+    stats["sim_seconds_precise"] = calculate_sim_seconds(stats)
+    return stats
+
+def calculate_sim_seconds(stats):
+    # more accurate than sim_seconds
+    return float(stats["sim_ticks"]) / float(stats["sim_freq"])
+
 
 def gem5_check_by_hand(args):
     bin_file_path = os.path.join("/data3/tydata3/code_optimization/cpp/test_out/p00030_s870509314_u032763525.out")
@@ -503,8 +768,14 @@ if __name__ == "__main__":
 
     # check_warning_after_benchmark(args)
 
-    check_correctness_after_benchmark(args)
+    # check_correctness_after_benchmark(args)
 
-    # data_stats_after_benchmark(args)
+    # collect_bench_correct_exec_correct_by_user(args)
+
+    collect_bench_correct_exec_correct_by_problem(args)
+
+    # rank_by_user(args)
+
+    # rank_by_problem(args)
 
     # gem5_check_by_hand(args)
