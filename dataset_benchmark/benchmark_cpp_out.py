@@ -21,7 +21,7 @@ def limit_virtual_memory():
 logging.basicConfig(
     level=logging.INFO,  
     format='%(asctime)s - %(levelname)s - %(message)s',  
-    filename='rank_by_user_train.log'  
+    filename='generate_dataset_by_user_train.log'  
 )
 
 TARGET_PROJECT = "/data3/tydata3/code_optimization/"
@@ -774,11 +774,7 @@ def rank_by_problem(args):
     """
     generate a rank jsonl file in  /data3/tydata3/code_optimization/cpp/prepared_by_problem/test/
     rank.jsonl
-
-    { problem_id:xxx, 
-      slow: {user_id:xxx, submission_id:xxx, average_sim_seconds_precise:xxx},
-      fast: {suer_id:xxx, submission_id:xxx, average_sim_seconds_precise:xxx},
-    }
+    {submission_id:xxx, user_id:xxx, problem_id:xxx, average_sim_seconds_precise:xxx}
     """
     target_dir = os.path.join(TARGET_PROJECT, args.language, "prepared_by_problem", args.split)
     problem_dir = os.listdir(target_dir)
@@ -871,6 +867,122 @@ def statistics(args):
     
     print(f"There are {cpp_file_count} cpp file.")
 
+def make_pair(rank_file):
+    """
+    rank_file: rank.jsonl
+    [a, b, c, d] -> [(a,b), (b,c), (c,d)]
+    return:
+        a list: [pair1, pair2, xxx]
+    """
+    rank_results = []
+    with open(rank_file, 'r') as f:
+        for line in f:
+            data_point = json.loads(line)
+            rank_results.append(data_point)
+    # print(rank_results)
+
+    # only one or zero submission_id
+    if len(rank_results) < 2: return None 
+
+    length = len(rank_results)
+    pairs = []
+    for i in range(length - 1):
+        slow_id, fast_id = i, i+1
+
+        data_slow = rank_results[slow_id]
+        slow_cpp_file_name = f"{data_slow['problem_id']}_{data_slow['submission_id']}_{data_slow['user_id']}.cpp"
+        slow_cpp_file_path = os.path.join(TARGET_PROJECT, args.language, args.split, slow_cpp_file_name)
+        with open(slow_cpp_file_path, 'r') as f_slow:
+            slow_cpp_content = f_slow.read()
+
+        data_fast = rank_results[fast_id]
+        fast_cpp_file_name = f"{data_fast['problem_id']}_{data_fast['submission_id']}_{data_fast['user_id']}.cpp"
+        fast_cpp_file_path = os.path.join(TARGET_PROJECT, args.language, args.split, fast_cpp_file_name)
+        with open(fast_cpp_file_path, 'r') as f_fast:
+            fast_cpp_content = f_fast.read()
+
+        item = {
+            "problem_id": data_slow["problem_id"],
+            "slow_user_id": data_slow["user_id"],
+            "slow_submission_id": data_slow["submission_id"],
+            "slow_average_sim_seconds_precise": data_slow["average_sim_seconds_precise"],
+            "slow_code": slow_cpp_content,
+            "fast_user_id": data_fast["user_id"],
+            "fast_submission_id": data_fast["submission_id"],
+            "fast_average_sim_seconds_precise": data_fast["average_sim_seconds_precise"],
+            "fast_code": fast_cpp_content
+        }
+        pairs.append(item)
+
+    return pairs
+
+def generate_dataset_by_problem(args):
+    """
+    generate dataset by 'problem'
+    [   
+        {
+          problem_id: xxx,
+          slow_user_id:xxx,
+          slow_submission_id: xxx,
+          slow_average_sim_seconds_precise: xxx,
+          slow_code: xxx,
+          fast_user_id:xxx,
+          fast_submission_id: xxx,
+          fast_average_sim_seconds_precise: xxx,
+          fast_code: xxx
+        }
+    ]
+    """
+    target_dir = os.path.join(TARGET_PROJECT, args.language, "prepared_by_problem", args.split)
+    problem_dir = os.listdir(target_dir)
+    items = []
+    for each_problem in tqdm(problem_dir, desc="Pair"):
+        problem_dir = os.path.join(target_dir, each_problem)
+        rank_file = os.path.join(problem_dir, "rank.jsonl")
+        pairs = make_pair(rank_file) # [item1, item2, xxx]
+        if pairs == None: continue
+
+        for item in pairs:
+            items.append(item)
+    
+    target_path = os.path.join(TARGET_PROJECT, args.language, "dataset", "by_problem", f"{args.split}.json")
+    with open(target_path, 'w') as f:
+        json.dump(items, f, indent=4)
+
+def generate_dataset_by_user(args):
+    """
+    generate dataset by 'user'
+    [   
+        {
+          problem_id: xxx,
+          slow_user_id:xxx,
+          slow_submission_id: xxx,
+          slow_average_sim_seconds_precise: xxx,
+          slow_code: xxx,
+          fast_user_id:xxx,
+          fast_submission_id: xxx,
+          fast_average_sim_seconds_precise: xxx,
+          fast_code: xxx
+        }
+    ]
+    """
+    target_dir = os.path.join(TARGET_PROJECT, args.language, "prepared_by_user", args.split)
+    problem_dir = os.listdir(target_dir)
+    items = []
+    for each_problem in tqdm(problem_dir, desc="Pair"):
+        problem_dir = os.path.join(target_dir, each_problem)
+        user_dir = os.listdir(problem_dir)
+        for each_user in user_dir:
+            rank_file = os.path.join(problem_dir, each_user, "rank.jsonl")
+            pairs = make_pair(rank_file) # [item1, item2, xxx]
+            if pairs == None: continue
+
+            for item in pairs:
+                items.append(item)
+    
+    target_path = os.path.join(TARGET_PROJECT, args.language, "dataset", "by_user", f"{args.split}.json")
+    with open(target_path, 'w') as f:
+        json.dump(items, f, indent=4)
 
 if __name__ == "__main__":
     args = parse_args()
@@ -889,8 +1001,12 @@ if __name__ == "__main__":
 
     # rank_by_problem(args)
 
-    rank_by_user(args)
+    # rank_by_user(args)
 
     # gem5_check_by_hand(args)
 
     # statistics(args)
+    
+    # generate_dataset_by_problem(args)
+
+    generate_dataset_by_user(args)
