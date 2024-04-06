@@ -21,7 +21,7 @@ def limit_virtual_memory():
 logging.basicConfig(
     level=logging.INFO,  
     format='%(asctime)s - %(levelname)s - %(message)s',  
-    filename='generate_dataset_by_user_train.log'  
+    filename='xxx.log'  
 )
 
 TARGET_PROJECT = "/data3/tydata3/code_optimization/"
@@ -33,7 +33,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="benchmark python/c++ out file")
     parser.add_argument('--output_dir', type=str, default=TARGET_PROJECT)
     parser.add_argument('--input_dir', type=str, default=INPUT_PROJECT)
-    parser.add_argument('--split', type=str, default='train')
+    parser.add_argument('--split', type=str, default='test')
     parser.add_argument('--language', type=str, default='cpp')
     parser.add_argument('--cstd', type=str, default='std=c++17')
     parser.add_argument('--optimization_flag', type=str, default='-O3')
@@ -857,16 +857,6 @@ def gem5_check_by_hand(args):
     print(f"stdout = {stdout}")
     print(f"stderr = {stderr}")
 
-def statistics(args):
-    cpp_file_count = 0
-    target_dir = os.path.join(TARGET_PROJECT, args.language, "prepared_by_user", args.split)
-    for root, dirs, files in os.walk(target_dir):
-        for file in files:
-            if file.endswith(".cpp"):
-                cpp_file_count += 1
-    
-    print(f"There are {cpp_file_count} cpp file.")
-
 def make_pair(rank_file):
     """
     rank_file: rank.jsonl
@@ -984,6 +974,15 @@ def generate_dataset_by_user(args):
     with open(target_path, 'w') as f:
         json.dump(items, f, indent=4)
 
+def dataset_statistics(args):
+    target_file = os.path.join(TARGET_PROJECT, args.language, "dataset", "by_user", f"{args.split}.json")
+    with open(target_file, 'r') as f:
+        dataset = json.load(f)
+
+    size = len(dataset)
+    print(f"dataset of {args.split} size = {size}")
+    return None
+
 if __name__ == "__main__":
     args = parse_args()
 
@@ -1004,9 +1003,9 @@ if __name__ == "__main__":
     # rank_by_user(args)
 
     # gem5_check_by_hand(args)
-
-    # statistics(args)
     
     # generate_dataset_by_problem(args)
 
-    generate_dataset_by_user(args)
+    # generate_dataset_by_user(args)
+
+    dataset_statistics(args)
