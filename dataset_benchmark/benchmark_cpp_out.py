@@ -1023,6 +1023,27 @@ def generate_dataset_by_user(args):
     with open(target_path, 'w') as f:
         json.dump(items, f, indent=4)
 
+def relative_improvement(slow:float, fast:float):
+    return round((slow - fast) / slow, 4)
+
+
+def generate_dataset_improvement_by_user(args):
+    target_file = os.path.join(TARGET_PROJECT, args.language, "dataset", "cross", "by_user", f"{args.split}.json")
+    with open(target_file, 'r') as f:
+        dataset = json.load(f)
+    # print(len(dataset))
+    datas_improvement = []
+    for item in tqdm(dataset):
+        slow_average_sim_seconds_precise = item["slow_average_sim_seconds_precise"]
+        fast_average_sim_seconds_precise = item["fast_average_sim_seconds_precise"]
+        improvement = relative_improvement(slow_average_sim_seconds_precise, fast_average_sim_seconds_precise)
+        if improvement > 0.1:
+            datas_improvement.append(item)
+    
+    print(len(datas_improvement))
+    return None
+
+
 def dataset_statistics(args):
     target_file = os.path.join(TARGET_PROJECT, args.language, "dataset", "by_user", f"{args.split}.json")
     with open(target_file, 'r') as f:
@@ -1055,6 +1076,8 @@ if __name__ == "__main__":
     
     # generate_dataset_by_problem(args)
 
-    generate_dataset_by_user(args)
+    # generate_dataset_by_user(args)
+
+    generate_dataset_improvement_by_user(args)
 
     # dataset_statistics(args)
