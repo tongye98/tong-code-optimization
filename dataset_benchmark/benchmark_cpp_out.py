@@ -21,7 +21,7 @@ def limit_virtual_memory():
 logging.basicConfig(
     level=logging.INFO,  
     format='%(asctime)s - %(levelname)s - %(message)s',  
-    filename='xxx.log'  
+    filename='generate_dataset_by_user_cross_test.log'  
 )
 
 TARGET_PROJECT = "/data3/tydata3/code_optimization/"
@@ -906,6 +906,55 @@ def make_pair(rank_file):
 
     return pairs
 
+def make_pair_v2(rank_file):
+    """
+    rank_file: rank.jsonl
+    [a, b, c, d] -> 
+    [(a, b), (a, c), (a, d), (b, c), (b, d), (c, d)]
+    return:
+        a list: [pair1, pair2, xxx]
+    """
+    rank_results = []
+    with open(rank_file, 'r') as f:
+        for line in f:
+            data_point = json.loads(line)
+            rank_results.append(data_point)
+    
+    if len(rank_results) < 2: return None 
+
+    length = len(rank_results)
+    pairs = []
+    for i in range(length):
+        for j in range(i+1, length):
+            slow_id, fast_id = i, j
+
+            data_slow = rank_results[slow_id]
+            slow_cpp_file_name = f"{data_slow['problem_id']}_{data_slow['submission_id']}_{data_slow['user_id']}.cpp"
+            slow_cpp_file_path = os.path.join(TARGET_PROJECT, args.language, args.split, slow_cpp_file_name)
+            with open(slow_cpp_file_path, 'r') as f_slow:
+                slow_cpp_content = f_slow.read()
+
+            data_fast = rank_results[fast_id]
+            fast_cpp_file_name = f"{data_fast['problem_id']}_{data_fast['submission_id']}_{data_fast['user_id']}.cpp"
+            fast_cpp_file_path = os.path.join(TARGET_PROJECT, args.language, args.split, fast_cpp_file_name)
+            with open(fast_cpp_file_path, 'r') as f_fast:
+                fast_cpp_content = f_fast.read()
+            
+            item = {
+                "problem_id": data_slow["problem_id"],
+                "slow_user_id": data_slow["user_id"],
+                "slow_submission_id": data_slow["submission_id"],
+                "slow_average_sim_seconds_precise": data_slow["average_sim_seconds_precise"],
+                "slow_code": slow_cpp_content,
+                "fast_user_id": data_fast["user_id"],
+                "fast_submission_id": data_fast["submission_id"],
+                "fast_average_sim_seconds_precise": data_fast["average_sim_seconds_precise"],
+                "fast_code": fast_cpp_content
+            }
+            pairs.append(item)  
+
+    return pairs          
+
 def generate_dataset_by_problem(args):
     """
     generate dataset by 'problem'
@@ -964,13 +1013,13 @@ def generate_dataset_by_user(args):
         user_dir = os.listdir(problem_dir)
         for each_user in user_dir:
             rank_file = os.path.join(problem_dir, each_user, "rank.jsonl")
-            pairs = make_pair(rank_file) # [item1, item2, xxx]
+            pairs = make_pair_v2(rank_file) # [item1, item2, xxx]
             if pairs == None: continue
 
             for item in pairs:
                 items.append(item)
     
-    target_path = os.path.join(TARGET_PROJECT, args.language, "dataset", "by_user", f"{args.split}.json")
+    target_path = os.path.join(TARGET_PROJECT, args.language, "dataset", "cross", "by_user", f"{args.split}.json")
     with open(target_path, 'w') as f:
         json.dump(items, f, indent=4)
 
@@ -1006,6 +1055,6 @@ if __name__ == "__main__":
     
     # generate_dataset_by_problem(args)
 
-    # generate_dataset_by_user(args)
+    generate_dataset_by_user(args)
 
-    dataset_statistics(args)
+    # dataset_statistics(args)

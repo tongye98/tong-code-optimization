@@ -1,0 +1,12 @@
+CUDA_VISIBLE_DEVICES=1 python src/train_bash.py \
+    --stage sft \
+    --do_predict \
+    --model_name_or_path /home/tongye2/llm_checkpoints/CodeLlama-13b-hf/models--codellama--CodeLlama-13b-hf/snapshots/a49a368460ad22e43dfffb97a1e1b826a6418d3b/ \
+    --adapter_name_or_path saves/codellama_13b_sft_pie_cpp/checkpoint-2754/ \
+    --dataset pie_cpp_test \
+    --template default \
+    --finetuning_type lora \
+    --output_dir saves/codellama_13b_sft_pie_cpp/checkpoint-2754/ \
+    --per_device_eval_batch_size 2 \
+    --predict_with_generate \
+    --fp16
