@@ -20,13 +20,13 @@ def limit_virtual_memory():
 logging.basicConfig(
     level=logging.INFO,  
     format='%(asctime)s - %(levelname)s - %(message)s',  
-    filename='benchmark_train.log'  
+    filename='benchmark_test.log'  
 )
 
 TARGET_PROJECT = "/data3/tydata3/code_optimization/cpp/"
 INPUT_PROJECT = "/home/tongye/code_generation/pie-perf/data/"
 MERGED_TEST_CASES = "/home/tongye/code_generation/pie-perf/data/test_cases/merged_test_cases/"
-MAX_TESTCASES=12
+MAX_TESTCASES=2000
 
 def parse_args():
     parser = argparse.ArgumentParser(description="benchmark python/c++ out file")
@@ -202,13 +202,13 @@ def benchmark_for_parallel(args, binary):
     # creat dir to store gem5 output
     # code_optimization → cpp → benchmark_gem5 → train/val/test_out 
     # → problem_id → user_id → submission_id → stat_testcaseid.txt
-    gem5_out_path = os.path.join(TARGET_PROJECT, "benchmark_gem5_testcases12", f"{args.split}_out", problem_id, user_id, submission_id)
+    gem5_out_path = os.path.join(TARGET_PROJECT, "benchmark_gem5_testcases_all", f"{args.split}_out", problem_id, user_id, submission_id)
     if not os.path.isdir(gem5_out_path):
         os.makedirs(gem5_out_path)
 
     test_cases_results = benchmark_single_file(args, problem_id, binary, gem5_out_path)
     # (test_cases_results)
-    with open(os.path.join(gem5_out_path, f"testcases_{MAX_TESTCASES}_benchmark_results.json"), 'w') as g:
+    with open(os.path.join(gem5_out_path, f"testcases_all_benchmark_results.json"), 'w') as g:
         json.dump(test_cases_results, g, indent=4)
 
     return None 
